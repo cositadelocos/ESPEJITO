@@ -133,9 +133,9 @@ function paintFog() {
     w * 0.32, h * 0.28, 0,
     w * 0.5, h * 0.55, Math.max(w, h) * 0.9
   );
-  base.addColorStop(0, 'rgba(238,244,246,0.90)');
-  base.addColorStop(0.45, 'rgba(214,224,227,0.90)');
-  base.addColorStop(1, 'rgba(178,190,195,0.92)');
+  base.addColorStop(0, 'rgba(238,244,246,0.62)');
+  base.addColorStop(0.45, 'rgba(214,224,227,0.62)');
+  base.addColorStop(1, 'rgba(178,190,195,0.66)');
   fogCtx.fillStyle = base;
   fogCtx.fillRect(0, 0, w, h);
 
@@ -196,7 +196,7 @@ function paintFog() {
     w / 2, h / 2, Math.max(w, h) * 0.72
   );
   vign.addColorStop(0, 'rgba(0,0,0,0)');
-  vign.addColorStop(1, 'rgba(40,50,55,0.16)');
+  vign.addColorStop(1, 'rgba(40,50,55,0.10)');
   fogCtx.fillStyle = vign;
   fogCtx.fillRect(0, 0, w, h);
 }
@@ -327,33 +327,52 @@ startBtn.addEventListener('click', async () => {
   loadingEl.classList.remove('hidden');
   statusEl.textContent = 'Solicitando acceso a la cámara…';
 
-  try {
-    const stream = await navigator.mediaDevices.getUserMedia({
-      video: { width: 1280, height: 720, facingMode: 'user' },
-      audio: false
-    });
-    video.srcObject = stream;
-
-    video.onloadedmetadata = () => {
-      resizeCanvas();
-      ready = true;
+  // seguridad: si algo se cuelga (típico en iOS Safari), no dejar el loading pegado para siempre
+  const safetyTimeout = setTimeout(() => {
+    if (!ready) {
       loadingEl.classList.add('hidden');
-      statusEl.textContent = 'Pellizca (junta pulgar e índice) y mueve la mano para escribir ✍️';
-    };
+      startBtn.disabled = false;
+      startBtn.textContent = 'Iniciar cámara';
+      statusEl.textContent = 'Se está tardando demasiado. Revisa que le hayas dado permiso de cámara a este sitio en Ajustes de Safari → esta página, y vuelve a intentar.';
+    }
+  }, 12000);
 
+  try {
+    // Una sola solicitud de cámara: la maneja por completo la utilidad Camera de MediaPipe
     camera = new Camera(video, {
       onFrame: async () => {
         await hands.send({ image: video });
       },
+      facingMode: 'user',
       width: 1280,
       height: 720
     });
-    camera.start();
 
-    startBtn.textContent = 'Cámara activa';
+    await camera.start();
+
+    // iOS a veces necesita un play() explícito dentro del mismo gesto para no quedarse colgado
+    try { await video.play(); } catch (e) { /* puede rechazar si ya está reproduciéndose, no pasa nada */ }
+
+    const onReady = () => {
+      clearTimeout(safetyTimeout);
+      if (ready) return;
+      resizeCanvas();
+      ready = true;
+      loadingEl.classList.add('hidden');
+      statusEl.textContent = 'Pellizca (junta pulgar e índice) y mueve la mano para escribir ✍️';
+      startBtn.textContent = 'Cámara activa';
+    };
+
+    if (video.videoWidth > 0) {
+      onReady();
+    } else {
+      video.addEventListener('loadedmetadata', onReady, { once: true });
+    }
   } catch (err) {
+    clearTimeout(safetyTimeout);
     loadingEl.classList.add('hidden');
     startBtn.disabled = false;
+    startBtn.textContent = 'Iniciar cámara';
     statusEl.textContent = 'No se pudo acceder a la cámara: ' + err.message;
   }
 });
